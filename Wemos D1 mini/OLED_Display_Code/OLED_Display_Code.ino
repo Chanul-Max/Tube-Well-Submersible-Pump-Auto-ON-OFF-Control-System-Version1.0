@@ -18,12 +18,12 @@ const unsigned long COUNTER_MAX = 16384;
 
 // Variables for Measuring 555 ON Pulse Period
 unsigned long lastMicrosON = 0;
-unsigned long periodON = 0; // In microseconds
+unsigned long periodON = 0; 
 int lastStateON = LOW;
 
 // Variables for Measuring 555 OFF Pulse Period
 unsigned long lastMicrosOFF = 0;
-unsigned long periodOFF = 0; // In microseconds
+unsigned long periodOFF = 0; 
 int lastStateOFF = LOW;
 
 // Mode Tracking (Relay State)
@@ -55,26 +55,22 @@ void setup() {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
   
-  // Initialize mode start time to now
   lastRelayState = digitalRead(PIN_RELAY);
   modeStartTime = millis();
 }
 
-// Helper: Format and print time to OLED in HH:MM:SS
+// Helper: Format and print time to OLED strictly in HH:MM (Neglecting seconds)
 void printFormattedTime(unsigned long ms) {
-  unsigned long totalSeconds = ms / 1000;
-  unsigned int hours = totalSeconds / 3600;
-  unsigned int minutes = (totalSeconds % 3600) / 60;
-  unsigned int seconds = totalSeconds % 60;
+  // Convert directly to total minutes, dropping the seconds entirely
+  unsigned long totalMinutes = ms / 60000ULL; 
+  unsigned int hours = totalMinutes / 60;
+  unsigned int minutes = totalMinutes % 60;
 
   if (hours < 10) display.print("0");
   display.print(hours);
   display.print(":");
   if (minutes < 10) display.print("0");
   display.print(minutes);
-  display.print(":");
-  if (seconds < 10) display.print("0");
-  display.print(seconds);
 }
 
 void loop() {
@@ -100,7 +96,7 @@ void loop() {
   // 3. TRACK RELAY STATE TO RESET ELAPSED TIME
   int relayState = digitalRead(PIN_RELAY);
   if (relayState != lastRelayState) {
-    modeStartTime = currentMillis; // Reset the timer because mode changed
+    modeStartTime = currentMillis; 
     lastRelayState = relayState;
   }
 
@@ -110,44 +106,45 @@ void loop() {
     lastDebounceTime = currentMillis;
   }
   if ((currentMillis - lastDebounceTime) > debounceDelay) {
-    if (reading == LOW) { // Button pressed (pulled to ground)
-      showConfiguredTimes = !showConfiguredTimes; // Toggle display mode
-      lastDebounceTime = currentMillis + 200;     // Extended debounce to prevent double-skips
+    if (reading == LOW) { 
+      showConfiguredTimes = !showConfiguredTimes; 
+      lastDebounceTime = currentMillis + 200;     
     }
   }
   lastButtonState = reading;
 
-  // 5. UPDATE DISPLAY (Limit refresh to 5 times a second to prevent flicker)
+  // 5. UPDATE DISPLAY 
   if (currentMillis - lastDisplayUpdate > 200) {
     lastDisplayUpdate = currentMillis;
     display.clearDisplay();
 
     // Convert microsecond periods to total milliseconds for full cycle
-    // Using 16384ULL prevents math overflow issues on the Wemos
     unsigned long totalTimeON_ms = (periodON * COUNTER_MAX) / 1000ULL;
     unsigned long totalTimeOFF_ms = (periodOFF * COUNTER_MAX) / 1000ULL;
 
     if (showConfiguredTimes) {
-      // --- VIEW 2: TOTAL CONFIGURED TIMES ---
+      // --- VIEW 2: TOTAL CONFIGURED TIMES (HH:MM) ---
       display.setTextSize(1);
       display.setCursor(0, 0);
       display.println(F("CALCULATED TOTALS"));
       display.drawLine(0, 10, 128, 10, SSD1306_WHITE);
 
-      display.setCursor(0, 20);
-      display.print(F("ON Time : "));
-      if (periodON == 0) display.print(F("Waiting...")); 
+      display.setTextSize(2);
+      
+      display.setCursor(0, 15);
+      display.print(F("ON :"));
+      if (periodON == 0) display.print(F("Wait")); 
       else printFormattedTime(totalTimeON_ms);
 
       display.setCursor(0, 40);
-      display.print(F("OFF Time: "));
-      if (periodOFF == 0) display.print(F("Waiting..."));
+      display.print(F("OFF:"));
+      if (periodOFF == 0) display.print(F("Wait"));
       else printFormattedTime(totalTimeOFF_ms);
 
     } else {
-      // --- VIEW 1: DYNAMIC REMAINING TIME ---
+      // --- VIEW 1: DYNAMIC REMAINING TIME (HH:MM) ---
       display.setTextSize(2);
-      display.setCursor(0, 5);
+      display.setCursor(0, 10);
 
       unsigned long elapsedTime = currentMillis - modeStartTime;
       unsigned long remainingTime = 0;
@@ -164,10 +161,8 @@ void loop() {
         }
       }
 
-      display.setTextSize(2);
       display.setCursor(0, 35);
       
-      // If still calculating the first pulse, notify user
       if ((relayState == HIGH && periodON == 0) || (relayState == LOW && periodOFF == 0)) {
          display.setTextSize(1);
          display.print(F("Scanning Pulse..."));
