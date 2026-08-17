@@ -30,6 +30,10 @@ unsigned long totalPeriodsON = 0;
 int readIndexON = 0;
 unsigned long smoothedPeriodON = 0;
 
+// Tracker for the blinking arrow (ignores tiny <20000us noise)
+unsigned long lastStablePeriodON = 0; 
+unsigned long lastAdjustTimeON = 0; 
+
 // Variables for Measuring & Smoothing 555 OFF Pulses
 unsigned long lastMicrosOFF = 0;
 unsigned long periodOFF = 0; 
@@ -40,6 +44,10 @@ unsigned long totalPeriodsOFF = 0;
 int readIndexOFF = 0;
 unsigned long smoothedPeriodOFF = 0;
 
+// Tracker for the blinking arrow (ignores tiny <20000us noise)
+unsigned long lastStablePeriodOFF = 0; 
+unsigned long lastAdjustTimeOFF = 0; 
+
 // Mode Tracking (Relay State)
 int lastRelayState = HIGH; 
 
@@ -49,11 +57,11 @@ int buttonState = HIGH;
 int lastButtonState = HIGH;
 unsigned long lastDebounceTime = 0;
 unsigned long debounceDelay = 100;
-bool forceDisplayUpdate = true; // Forces immediate draw on state change
+bool forceDisplayUpdate = true; 
 
 // Display refresh timer
 unsigned long lastDisplayUpdate = 0;
-const unsigned long DISPLAY_INTERVAL = 1000; // Update OLED every 1 second
+const unsigned long DISPLAY_INTERVAL = 250; // 4 FPS for smooth animations
 
 void setup() {
   pinMode(PIN_555_ON, INPUT);
@@ -93,7 +101,6 @@ void loop() {
     pulsesON = 0;  
     pulsesOFF = 0;
     
-    // Clear moving average arrays to prevent cross-contamination of timing
     memset(readingsON, 0, sizeof(readingsON));
     totalPeriodsON = 0;
     readIndexON = 0;
@@ -105,7 +112,7 @@ void loop() {
     smoothedPeriodOFF = 0;
     
     lastRelayState = relayState;
-    forceDisplayUpdate = true; // Update screen instantly
+    forceDisplayUpdate = true; 
   }
 
   // 2. MEASURE & SMOOTH MOTOR ON 555
@@ -115,7 +122,7 @@ void loop() {
     lastMicrosON = currentMicros;
     if (pulsesON < COUNTER_ON_MAX) pulsesON++; 
 
-    // Moving Average Calculation
+    // Standard Moving Average
     totalPeriodsON = totalPeriodsON - readingsON[readIndexON];
     readingsON[readIndexON] = periodON;
     totalPeriodsON = totalPeriodsON + readingsON[readIndexON];
@@ -125,6 +132,13 @@ void loop() {
       smoothedPeriodON = totalPeriodsON / pulsesON; 
     } else {
       smoothedPeriodON = totalPeriodsON / NUM_SAMPLES; 
+    }
+
+    // Check if the value is being actively changed by the potentiometer
+    unsigned long diffON = (smoothedPeriodON > lastStablePeriodON) ? (smoothedPeriodON - lastStablePeriodON) : (lastStablePeriodON - smoothedPeriodON);
+    if (diffON > 20000) { // 20000us (20ms) threshold ignores small analog noise
+      lastAdjustTimeON = currentMillis;
+      lastStablePeriodON = smoothedPeriodON;
     }
   }
   lastStateON = stateON;
@@ -136,7 +150,7 @@ void loop() {
     lastMicrosOFF = currentMicros;
     if (pulsesOFF < COUNTER_OFF_MAX) pulsesOFF++; 
 
-    // Moving Average Calculation
+    // Standard Moving Average
     totalPeriodsOFF = totalPeriodsOFF - readingsOFF[readIndexOFF];
     readingsOFF[readIndexOFF] = periodOFF;
     totalPeriodsOFF = totalPeriodsOFF + readingsOFF[readIndexOFF];
@@ -147,10 +161,17 @@ void loop() {
     } else {
       smoothedPeriodOFF = totalPeriodsOFF / NUM_SAMPLES; 
     }
+
+    // Check if the value is being actively changed by the potentiometer
+    unsigned long diffOFF = (smoothedPeriodOFF > lastStablePeriodOFF) ? (smoothedPeriodOFF - lastStablePeriodOFF) : (lastStablePeriodOFF - smoothedPeriodOFF);
+    if (diffOFF > 20000) { // 20000us (20ms) threshold ignores small analog noise
+      lastAdjustTimeOFF = currentMillis;
+      lastStablePeriodOFF = smoothedPeriodOFF;
+    }
   }
   lastStateOFF = stateOFF;
 
-  // 4. ROBUST BUTTON DEBOUNCE & STATE CHANGE DETECTION
+  // 4. ROBUST BUTTON DEBOUNCE
   int reading = digitalRead(PIN_BUTTON);
   if (reading != lastButtonState) {
     lastDebounceTime = currentMillis; 
@@ -159,19 +180,21 @@ void loop() {
   if ((currentMillis - lastDebounceTime) > debounceDelay) {
     if (reading != buttonState) {
       buttonState = reading;
-
       if (buttonState == LOW) {
         showConfiguredTimes = !showConfiguredTimes; 
-        forceDisplayUpdate = true; // Update screen instantly
+        forceDisplayUpdate = true; 
       }
     }
   }
   lastButtonState = reading;
 
-  // 5. UPDATE DISPLAY (Every 1 second OR instantly if forced)
+  // 5. UPDATE DISPLAY 
   if (forceDisplayUpdate || (currentMillis - lastDisplayUpdate > DISPLAY_INTERVAL)) {
     lastDisplayUpdate = currentMillis;
     forceDisplayUpdate = false; 
+    
+    // Core animation clock updating every 250ms
+    bool blinkArrow = (currentMillis / 250) % 2; 
     
     display.clearDisplay();
 
@@ -181,18 +204,30 @@ void loop() {
       unsigned long long totalTimeOFF_ms = ((unsigned long long)COUNTER_OFF_MAX * smoothedPeriodOFF) / 1000ULL;
 
       display.setTextSize(1);
-      display.setCursor(28, 0); // Centered: (128 - (12 * 6)) / 2 = 28
+      display.setCursor(28, 0); 
       display.println(F("SET THE TIME"));
+
+      // Solid Underline
       display.drawLine(0, 10, 128, 10, SSD1306_WHITE);
 
       display.setTextSize(2);
       
-      display.setCursor(4, 18);
+      // Motor ON Time
+      if ((currentMillis - lastAdjustTimeON < 2000) && blinkArrow) {
+        display.setCursor(0, 18);
+        display.print(F(">"));
+      }
+      display.setCursor(10, 18);
       display.print(F("ON :"));
       if (smoothedPeriodON == 0) display.print(F("Wait")); 
       else printFormattedTime(totalTimeON_ms);
 
-      display.setCursor(4, 42);
+      // Motor OFF Time
+      if ((currentMillis - lastAdjustTimeOFF < 2000) && blinkArrow) {
+        display.setCursor(0, 42);
+        display.print(F(">"));
+      }
+      display.setCursor(10, 42);
       display.print(F("OFF:"));
       if (smoothedPeriodOFF == 0) display.print(F("Wait")); 
       else printFormattedTime(totalTimeOFF_ms);
@@ -200,14 +235,15 @@ void loop() {
     } else {
       // --- VIEW 1: REMAINING TIME ---
       display.setTextSize(1);
-      display.setCursor(22, 0); // Centered: (128 - (14 * 6)) / 2 = 22
+      display.setCursor(22, 0); 
       display.println(F("REMAINING TIME"));
       display.drawLine(0, 10, 128, 10, SSD1306_WHITE);
 
       display.setTextSize(2);
-      display.setCursor(4, 28); // Centered vertically below line
+      display.setCursor(10, 20);
 
       unsigned long long remainingTime_ms = 0;
+      int progressPercent = 0; 
 
       if (relayState == LOW) { // Motor ON mode
         display.print(F("ON :"));
@@ -216,6 +252,7 @@ void loop() {
         } else {
           remainingTime_ms = ((unsigned long long)(COUNTER_ON_MAX - pulsesON) * smoothedPeriodON) / 1000ULL;
           printFormattedTime(remainingTime_ms);
+          progressPercent = ((COUNTER_ON_MAX - pulsesON) * 100) / COUNTER_ON_MAX;
         }
       } else { // Motor OFF mode
         display.print(F("OFF:"));
@@ -224,7 +261,21 @@ void loop() {
         } else {
           remainingTime_ms = ((unsigned long long)(COUNTER_OFF_MAX - pulsesOFF) * smoothedPeriodOFF) / 1000ULL;
           printFormattedTime(remainingTime_ms);
+          progressPercent = ((COUNTER_OFF_MAX - pulsesOFF) * 100) / COUNTER_OFF_MAX;
         }
+      }
+
+      // Progress Bar Animation
+      int barWidth = 112;
+      int barHeight = 12;
+      int barX = 8;
+      int barY = 46;
+      
+      display.drawRect(barX, barY, barWidth, barHeight, SSD1306_WHITE);
+      
+      int fillWidth = (progressPercent * (barWidth - 4)) / 100;
+      if (fillWidth > 0) {
+        display.fillRect(barX + 2, barY + 2, fillWidth, barHeight - 4, SSD1306_WHITE);
       }
     }
     
