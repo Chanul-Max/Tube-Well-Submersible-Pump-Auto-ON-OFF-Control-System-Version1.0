@@ -13,8 +13,9 @@ const int PIN_555_OFF  = 12; // D6
 const int PIN_RELAY    = 13; // D7
 const int PIN_BUTTON   = 0;  // D3
 
-// Timing Multiplier for CD4000 series binary counter
-const unsigned long COUNTER_MAX = 16384; 
+// Timing Multipliers for Binary Counters
+const unsigned long COUNTER_ON_MAX = 16384;  // 2^14
+const unsigned long COUNTER_OFF_MAX = 32768; // 2^15
 
 // Variables for Measuring & Counting 555 ON Pulses
 unsigned long lastMicrosON = 0;
@@ -29,7 +30,7 @@ int lastStateOFF = LOW;
 unsigned long pulsesOFF = 0; 
 
 // Mode Tracking (Relay State)
-int lastRelayState = LOW;
+int lastRelayState = HIGH; // Default to HIGH (Motor OFF in Active-LOW logic)
 
 // Button & UI State
 bool showConfiguredTimes = false; 
@@ -61,7 +62,8 @@ void setup() {
   
   lastRelayState = digitalRead(PIN_RELAY);
   Serial.print(F("Initial Relay State: "));
-  Serial.println(lastRelayState == HIGH ? F("MOTOR ON") : F("MOTOR OFF"));
+  // INVERTED LOGIC: LOW is Motor ON
+  Serial.println(lastRelayState == LOW ? F("MOTOR ON") : F("MOTOR OFF"));
 }
 
 // Helper: Format and print time to OLED strictly in HH:MM
@@ -86,7 +88,8 @@ void loop() {
   if (relayState != lastRelayState) {
     Serial.println(F("\n>>> RELAY STATE CHANGE DETECTED <<<"));
     Serial.print(F("New Mode: "));
-    Serial.println(relayState == HIGH ? F("MOTOR ON") : F("MOTOR OFF"));
+    // INVERTED LOGIC: LOW is Motor ON
+    Serial.println(relayState == LOW ? F("MOTOR ON") : F("MOTOR OFF"));
     Serial.println(F("Resetting pulse counters to 0."));
     
     pulsesON = 0;  
@@ -99,7 +102,7 @@ void loop() {
   if (stateON == HIGH && lastStateON == LOW) {
     periodON = currentMicros - lastMicrosON;
     lastMicrosON = currentMicros;
-    if (pulsesON < COUNTER_MAX) pulsesON++; 
+    if (pulsesON < COUNTER_ON_MAX) pulsesON++; 
     
     Serial.print(F("[555 ON] Pulse Detected! Count: "));
     Serial.print(pulsesON);
@@ -114,7 +117,7 @@ void loop() {
   if (stateOFF == HIGH && lastStateOFF == LOW) {
     periodOFF = currentMicros - lastMicrosOFF;
     lastMicrosOFF = currentMicros;
-    if (pulsesOFF < COUNTER_MAX) pulsesOFF++; 
+    if (pulsesOFF < COUNTER_OFF_MAX) pulsesOFF++; 
     
     Serial.print(F("[555 OFF] Pulse Detected! Count: "));
     Serial.print(pulsesOFF);
@@ -145,9 +148,10 @@ void loop() {
     lastSerialUpdate = currentMillis;
     Serial.println(F("--- SYSTEM STATUS ---"));
     Serial.print(F("Active Mode: "));
-    Serial.println(relayState == HIGH ? F("MOTOR ON") : F("MOTOR OFF"));
-    Serial.print(F("ON Timer  -> Pulses: ")); Serial.print(pulsesON); Serial.print(F("/16384 | Period: ")); Serial.println(periodON);
-    Serial.print(F("OFF Timer -> Pulses: ")); Serial.print(pulsesOFF); Serial.print(F("/16384 | Period: ")); Serial.println(periodOFF);
+    // INVERTED LOGIC: LOW is Motor ON
+    Serial.println(relayState == LOW ? F("MOTOR ON") : F("MOTOR OFF"));
+    Serial.print(F("ON Timer  -> Pulses: ")); Serial.print(pulsesON); Serial.print(F("/")); Serial.print(COUNTER_ON_MAX); Serial.print(F(" | Period: ")); Serial.println(periodON);
+    Serial.print(F("OFF Timer -> Pulses: ")); Serial.print(pulsesOFF); Serial.print(F("/")); Serial.print(COUNTER_OFF_MAX); Serial.print(F(" | Period: ")); Serial.println(periodOFF);
     Serial.println(F("---------------------"));
   }
 
@@ -157,8 +161,8 @@ void loop() {
     display.clearDisplay();
 
     if (showConfiguredTimes) {
-      unsigned long long totalTimeON_ms = ((unsigned long long)COUNTER_MAX * periodON) / 1000ULL;
-      unsigned long long totalTimeOFF_ms = ((unsigned long long)COUNTER_MAX * periodOFF) / 1000ULL;
+      unsigned long long totalTimeON_ms = ((unsigned long long)COUNTER_ON_MAX * periodON) / 1000ULL;
+      unsigned long long totalTimeOFF_ms = ((unsigned long long)COUNTER_OFF_MAX * periodOFF) / 1000ULL;
 
       display.setTextSize(1);
       display.setCursor(0, 0);
@@ -183,17 +187,19 @@ void loop() {
 
       unsigned long long remainingTime_ms = 0;
 
-      if (relayState == HIGH) { 
+      // INVERTED LOGIC: LOW is Motor ON
+      if (relayState == LOW) { 
         display.println(F("Motor ON"));
-        remainingTime_ms = ((unsigned long long)(COUNTER_MAX - pulsesON) * periodON) / 1000ULL;
+        remainingTime_ms = ((unsigned long long)(COUNTER_ON_MAX - pulsesON) * periodON) / 1000ULL;
       } else { 
         display.println(F("Motor OFF"));
-        remainingTime_ms = ((unsigned long long)(COUNTER_MAX - pulsesOFF) * periodOFF) / 1000ULL;
+        remainingTime_ms = ((unsigned long long)(COUNTER_OFF_MAX - pulsesOFF) * periodOFF) / 1000ULL;
       }
 
       display.setCursor(0, 35);
       
-      if ((relayState == HIGH && periodON == 0) || (relayState == LOW && periodOFF == 0)) {
+      // INVERTED LOGIC: Check appropriate states before scanning finishes
+      if ((relayState == LOW && periodON == 0) || (relayState == HIGH && periodOFF == 0)) {
          display.setTextSize(1);
          display.print(F("Scanning Pulse..."));
       } else {
